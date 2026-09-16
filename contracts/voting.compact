@@ -1,0 +1,56 @@
+pragma language_version >= 0.16;
+
+import CompactStandardLibrary;
+
+// ---------------------------------------------------------------------------
+// Public ledger state
+// ---------------------------------------------------------------------------
+// The tree itself lives on-chain and owns its own root — the contract never
+// trusts a client-submitted root, only a client-submitted *leaf* to insert
+// and a *path* to verify against whatever root the tree currently has.
+
+
+export ledger eligibilityTree: MerkleTree<32, Bytes<32>>;
+export ledger usedNullifiers: Set<Bytes<32>>;
+export ledger yesVotes: Counter;
+export ledger noVotes: Counter;
+
+// ---------------------------------------------------------------------------
+// Private witnesses — supplied by TypeScript callbacks on the voter's
+// device, never submitted to the network in raw form.
+// ---------------------------------------------------------------------------
+
+
+witness voterSecretKey(): Bytes<32>;
+witness merklePath(): MerkleTreePath<32, Bytes<32>>;
+witness voteChoice(): Boolean;
+
+// ---------------------------------------------------------------------------
+// Registration: commit a new voter's leaf into the public eligibility tree.
+// The leaf (hash of the secret key) is a one-way commitment — it becomes
+// public, but the secret key behind it never does.
+// ---------------------------------------------------------------------------
+
+
+export circuit register(): [] {
+    const leaf = hash(voterSecretKey());
+    eligibilityTree.insert(disclose(leaf));
+}
+export circuit castVote(): [] {
+       const leaf = hash(voterSecretKey());
+    assert(
+        merklePath().root(leaf) == eligibilityTree.root(),
+        "Not an eligible voter"
+    );
+    const nullifier = hash([voterSecretKey(), "vote-2026"]);
+    assert(
+        !usedNullifiers.member(disclose(nullifier)),
+        "Already voted"
+    );
+    usedNullifiers.insert(disclose(nullifier));
+    if (voteChoice()) {
+        yesVotes.increment(1);
+    } else {
+        noVotes.increment(1);
+    }
+}
